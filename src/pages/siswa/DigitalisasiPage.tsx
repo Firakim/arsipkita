@@ -90,35 +90,40 @@ export default function DigitalisasiPage() {
   const set = (k: keyof typeof form, v: string | number) =>
     setForm((prev) => ({ ...prev, [k]: v }));
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!form.nomorDokumen.trim()) return setError('Nomor dokumen wajib diisi.');
     if (!file) return setError('Berkas dokumen wajib diunggah.');
     setSaving(true);
-    addArsip({
-      ...form,
-      file,
-    });
-    setSaving(false);
-    setSaved(true);
-    // reset
-    setForm({
-      nomorDokumen: '',
-      namaBerkas: '',
-      jenisDokumen: 'Surat Masuk',
-      pengirim: '',
-      penerima: '',
-      perihal: '',
-      lampiran: '',
-      isiRingkas: '',
-      tembusan: '',
-      subjek: SUBJEK_OPTIONS[0],
-      bulan: BULAN_OPTIONS[new Date().getMonth()],
-      masaRetensiHari: 30,
-    });
-    removeFile();
-    setTimeout(() => setSaved(false), 3500);
+    try {
+      await addArsip({
+        ...form,
+        file,
+      });
+      setSaved(true);
+      // reset
+      setForm({
+        nomorDokumen: '',
+        namaBerkas: '',
+        jenisDokumen: 'Surat Masuk',
+        pengirim: '',
+        penerima: '',
+        perihal: '',
+        lampiran: '',
+        isiRingkas: '',
+        tembusan: '',
+        subjek: SUBJEK_OPTIONS[0],
+        bulan: BULAN_OPTIONS[new Date().getMonth()],
+        masaRetensiHari: 30,
+      });
+      removeFile();
+      setTimeout(() => setSaved(false), 3500);
+    } catch (err: any) {
+      setError(err?.message || 'Gagal menyimpan arsip ke database.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const isPdf = file?.type === 'application/pdf' || file?.name.toLowerCase().endsWith('.pdf');

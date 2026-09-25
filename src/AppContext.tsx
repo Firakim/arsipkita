@@ -18,14 +18,15 @@ import type {
 import {
   STORAGE_KEY,
   computeRetensiStatus,
+  getNilaiHuruf,
   uid,
 } from './lib/storage';
-import { supabase } from './lib/supabase';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 
 interface PersistedState {
   arsip: Arsip[];
   siswaList: Siswa[];
-  currentUserId: string | null;
+  currentUser: AuthUser | null;
 }
 
 interface AppContextValue {
@@ -35,13 +36,14 @@ interface AppContextValue {
   login: (role: 'siswa' | 'guru', accessCode: string, name: string, kelas?: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
   setViewMode: (mode: 'siswa' | 'guru') => void;
-  addArsip: (data: ArsipInput) => Arsip;
-  updateArsip: (id: string, patch: Partial<Arsip>) => void;
-  deleteArsip: (id: string) => void;
-  setAksiPenyusutan: (id: string, aksi: 'pindah_inaktif' | 'antre_pemusnahan') => void;
-  prosesPemusnahan: (id: string) => void;
-  setNilai: (id: string, nilaiAngka: number | null, catatan: string) => void;
+  addArsip: (data: ArsipInput) => Promise<Arsip | null>;
+  updateArsip: (id: string, patch: Partial<Arsip>) => Promise<void> | void;
+  deleteArsip: (id: string) => Promise<void> | void;
+  setAksiPenyusutan: (id: string, aksi: 'pindah_inaktif' | 'antre_pemusnahan') => Promise<void> | void;
+  prosesPemusnahan: (id: string) => Promise<void> | void;
+  setNilai: (id: string, nilaiAngka: number | null, catatan: string) => Promise<void> | void;
   getArsipBySiswa: (siswaId: string) => Arsip[];
+  refreshData: () => Promise<void>;
   lastSync: number;
 }
 
@@ -49,6 +51,47 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 const SISWA_CODE = 'SISWA123';
 const GURU_CODE = 'GURU123';
+
+function mapRowToArsip(row: any): Arsip {
+  return {
+    id: row.id,
+    siswaId: row.siswa_id,
+    siswaName: row.siswa_name || '',
+    nomorDokumen: row.nomor_dokumen || '',
+    namaBerkas: row.nama_berkas || '',
+    jenisDokumen: row.jenis_dokumen,
+    pengirim: row.pengirim || '',
+    penerima: row.penerima || '',
+    perihal: row.perihal || '',
+    lampiran: row.lampiran || '',
+    isiRingkas: row.isi_ringkas || '',
+    tembusan: row.tembusan || '',
+    file: row.file_name
+      ? {
+          name: row.file_name,
+          size: Number(row.file_size) || 0,
+          type: row.file_type || '',
+          dataUrl: row.file_data_url || '',
+        }
+      : null,
+    subjek: row.subjek || '',
+    bulan: row.bulan || '',
+    tanggal: row.tanggal || row.created_at,
+    masaRetensiHari: row.masa_retensi_hari ?? 30,
+    tanggalRetensi: row.tanggal_retensi || '',
+    status: row.status || 'aktif',
+    aksiPenyusutan: row.aksi_penyusutan || null,
+    tanggalAksi: row.tanggal_aksi || null,
+    catatanGuru: row.catatan_guru || '',
+    nilai: row.nilai || '',
+    nilaiAngka:
+      row.nilai_angka !== null && row.nilai_angka !== undefined
+        ? Number(row.nilai_angka)
+        : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 function loadState(): PersistedState {
   try {
@@ -58,13 +101,13 @@ function loadState(): PersistedState {
       return {
         arsip: parsed.arsip ?? [],
         siswaList: parsed.siswaList ?? [],
-        currentUserId: parsed.currentUserId ?? null,
+        currentUser: parsed.currentUser ?? null,
       };
     }
   } catch {
     // ignore
   }
-  return { arsip: [], siswaList: [], currentUserId: null };
+  return { arsip: [], siswaList: [], currentUser: null };
 }
 
 function saveState(state: PersistedState): number {
@@ -79,17 +122,73 @@ function saveState(state: PersistedState): number {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<PersistedState>(() => loadState());
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    const loaded = loadState();
+    return loaded.currentUser ?? null;
+  });
   const [lastSync, setLastSync] = useState<number>(Date.now());
   const skipNextStorageEvent = useRef(false);
   const lastSaveRevRef = useRef<number>(0);
 
   // Persist on change
   useEffect(() => {
-    lastSaveRevRef.current = saveState(state);
-  }, [state]);
+    lastSaveRevRef.current = saveState({ ...state, currentUser });
+  }, [state, currentUser]);
 
-  // Cross-tab / cross-view real-time sync via storage event
+  // Sync data from Supabase
+  const fetchSupabaseData = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+    try {
+      const [siswaRes, arsipRes] = await Promise.all([
+        supabase.from('siswa').select('id, name, kelas').order('name'),
+        supabase.from('arsip').select('*').order('created_at', { ascending: false }),
+      ]);
+
+      setState((prev) => {
+        const newSiswa = siswaRes.data && siswaRes.data.length > 0 ? siswaRes.data : prev.siswaList;
+        const newArsip = arsipRes.data ? arsipRes.data.map(mapRowToArsip) : prev.arsip;
+        return {
+          ...prev,
+          siswaList: newSiswa,
+          arsip: newArsip,
+        };
+      });
+      setLastSync(Date.now());
+    } catch (err) {
+      console.error('Gagal mengambil data dari Supabase:', err);
+    }
+  }, []);
+
+  // Realtime subscription and initial fetch from Supabase
+  useEffect(() => {
+    fetchSupabaseData();
+
+    if (!isSupabaseConfigured) return;
+
+    const channel = supabase
+      .channel('arsipkita_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'arsip' },
+        () => {
+          fetchSupabaseData();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'siswa' },
+        () => {
+          fetchSupabaseData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchSupabaseData]);
+
+  // Cross-tab sync via storage event
   useEffect(() => {
     const handler = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) return;
@@ -101,13 +200,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const parsed = JSON.parse(e.newValue) as PersistedState & { _rev?: number };
         const incomingRev = parsed._rev ?? 0;
-        // Skip stale snapshots — our state is at least as new
         if (incomingRev <= lastSaveRevRef.current) return;
         setState((prev) => ({
           arsip: parsed.arsip ?? prev.arsip,
           siswaList: parsed.siswaList ?? prev.siswaList,
-          currentUserId: parsed.currentUserId ?? prev.currentUserId,
+          currentUser: parsed.currentUser ?? prev.currentUser,
         }));
+        if (parsed.currentUser !== undefined) {
+          setCurrentUser(parsed.currentUser);
+        }
         setLastSync(Date.now());
       } catch {
         // ignore
@@ -117,39 +218,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('storage', handler);
   }, []);
 
-  // Also poll periodically for same-tab updates (e.g. siswa & guru in same tab via view toggle).
-  // Skips stale snapshots to prevent overwriting newer in-memory state.
-  useEffect(() => {
-    const interval = setInterval(() => {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as PersistedState & { _rev?: number };
-        const incomingRev = parsed._rev ?? 0;
-        // Skip if our state is at least as new as what's in localStorage
-        if (incomingRev <= lastSaveRevRef.current) return;
-        setState((prev) => {
-          const same =
-            JSON.stringify(prev.arsip) === JSON.stringify(parsed.arsip ?? prev.arsip) &&
-            JSON.stringify(prev.siswaList) === JSON.stringify(parsed.siswaList ?? prev.siswaList);
-          if (same) return prev;
-          return {
-            arsip: parsed.arsip ?? prev.arsip,
-            siswaList: parsed.siswaList ?? prev.siswaList,
-            currentUserId: parsed.currentUserId ?? prev.currentUserId,
-          };
-        });
-        setLastSync(Date.now());
-      } catch {
-        // ignore
-      }
-    }, 1500);
-    return () => clearInterval(interval);
-  }, []);
-
   const login = useCallback<AppContextValue['login']>(
     async (role, accessCode, name, kelas) => {
       if (!name.trim()) return { ok: false, error: 'Nama wajib diisi.' };
+
       if (role === 'siswa') {
         if (accessCode.trim().toUpperCase() !== SISWA_CODE)
           return { ok: false, error: 'Kode akses siswa salah.' };
@@ -157,37 +229,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const trimmedName = name.trim();
         const trimmedKelas = (kelas ?? '').trim() || '-';
 
-        // Look up existing siswa in Supabase by name + kelas
-        const { data: existing, error: lookupError } = await supabase
-          .from('siswa')
-          .select('id, name, kelas')
-          .eq('name', trimmedName)
-          .eq('kelas', trimmedKelas)
-          .maybeSingle();
+        let siswaId = uid('sw');
+        let siswaName = trimmedName;
 
-        if (lookupError) {
-          return { ok: false, error: 'Gagal terhubung ke server. Coba lagi.' };
-        }
-
-        let siswaId: string;
-        let siswaName: string;
-
-        if (existing) {
-          siswaId = existing.id;
-          siswaName = existing.name;
-        } else {
-          const { data: created, error: insertError } = await supabase
+        if (isSupabaseConfigured) {
+          // Look up existing siswa in Supabase by name + kelas
+          const { data: existing, error: lookupError } = await supabase
             .from('siswa')
-            .insert({ name: trimmedName, kelas: trimmedKelas })
-            .select('id, name')
-            .single();
+            .select('id, name, kelas')
+            .eq('name', trimmedName)
+            .eq('kelas', trimmedKelas)
+            .maybeSingle();
 
-          if (insertError || !created) {
-            return { ok: false, error: 'Gagal membuat data siswa. Coba lagi.' };
+          if (lookupError) {
+            return { ok: false, error: 'Gagal terhubung ke database server. Pastikan pengaturan Supabase di Vercel sudah benar.' };
           }
 
-          siswaId = created.id;
-          siswaName = created.name;
+          if (existing) {
+            siswaId = existing.id;
+            siswaName = existing.name;
+          } else {
+            const { data: created, error: insertError } = await supabase
+              .from('siswa')
+              .insert({ name: trimmedName, kelas: trimmedKelas })
+              .select('id, name')
+              .single();
+
+            if (insertError || !created) {
+              return { ok: false, error: 'Gagal membuat data siswa di database.' };
+            }
+
+            siswaId = created.id;
+            siswaName = created.name;
+          }
         }
 
         const siswaEntry: Siswa = {
@@ -196,126 +270,222 @@ export function AppProvider({ children }: { children: ReactNode }) {
           kelas: trimmedKelas,
         };
 
+        const authUser: AuthUser = {
+          role: 'siswa',
+          name: siswaName,
+          siswaId,
+          viewMode: 'siswa',
+        };
+
         skipNextStorageEvent.current = true;
         setState((prev) => {
-          // Find old sw_... entries with same name + kelas to migrate
           const oldSiswaIds = prev.siswaList
-            .filter(
-              (s) =>
-                s.id !== siswaId &&
-                s.name === trimmedName &&
-                s.kelas === trimmedKelas
-            )
+            .filter((s) => s.id !== siswaId && s.name === trimmedName && s.kelas === trimmedKelas)
             .map((s) => s.id);
 
-          // Migrate arsip: reassign old siswaId → Supabase UUID
           let migratedArsip = prev.arsip;
           if (oldSiswaIds.length > 0) {
             migratedArsip = prev.arsip.map((a) =>
-              oldSiswaIds.includes(a.siswaId)
-                ? { ...a, siswaId: siswaId }
-                : a
+              oldSiswaIds.includes(a.siswaId) ? { ...a, siswaId } : a
             );
           }
 
-          // Remove old sw_... duplicates and the Supabase entry, then add the clean one
           const cleanedSiswaList = prev.siswaList.filter(
-            (s) =>
-              s.id !== siswaId &&
-              !oldSiswaIds.includes(s.id)
+            (s) => s.id !== siswaId && !oldSiswaIds.includes(s.id)
           );
 
           return {
             ...prev,
             arsip: migratedArsip,
             siswaList: [...cleanedSiswaList, siswaEntry],
-            currentUserId: siswaId,
+            currentUser: authUser,
           };
         });
-        setCurrentUser({ role: 'siswa', name: siswaName, siswaId, viewMode: 'siswa' });
+        setCurrentUser(authUser);
+        if (isSupabaseConfigured) {
+          fetchSupabaseData();
+        }
         return { ok: true };
       }
+
       // guru
       if (accessCode.trim().toUpperCase() !== GURU_CODE)
         return { ok: false, error: 'Kode akses guru salah.' };
-      const guruId = uid('gr');
+
+      const guruUser: AuthUser = {
+        role: 'guru',
+        name: name.trim(),
+        viewMode: 'guru',
+      };
       skipNextStorageEvent.current = true;
-      setState((prev) => ({ ...prev, currentUserId: guruId }));
-      setCurrentUser({ role: 'guru', name: name.trim(), viewMode: 'guru' });
+      setState((prev) => ({ ...prev, currentUser: guruUser }));
+      setCurrentUser(guruUser);
+      if (isSupabaseConfigured) {
+        fetchSupabaseData();
+      }
       return { ok: true };
     },
-    []
+    [fetchSupabaseData]
   );
 
   const logout = useCallback(() => {
     skipNextStorageEvent.current = true;
-    setState((prev) => ({ ...prev, currentUserId: null }));
+    setState((prev) => ({ ...prev, currentUser: null }));
     setCurrentUser(null);
   }, []);
 
   const setViewMode = useCallback((mode: 'siswa' | 'guru') => {
-    setCurrentUser((u) => (u ? { ...u, viewMode: mode } : u));
+    setCurrentUser((u) => {
+      if (!u) return u;
+      const updated = { ...u, viewMode: mode };
+      setState((prev) => ({ ...prev, currentUser: updated }));
+      return updated;
+    });
   }, []);
 
-  const addArsip = useCallback<AppContextValue['addArsip']>((data: ArsipInput) => {
-    const now = new Date();
-    const retDate = new Date(now);
-    retDate.setDate(retDate.getDate() + data.masaRetensiHari);
-    const id = uid('ar');
-    const newArsip: Arsip = {
-      id,
-      siswaId: currentUser?.siswaId ?? 'unknown',
-      siswaName: currentUser?.name ?? 'Siswa',
-      nomorDokumen: data.nomorDokumen,
-      namaBerkas: data.namaBerkas,
-      jenisDokumen: data.jenisDokumen,
-      pengirim: data.pengirim,
-      penerima: data.penerima,
-      perihal: data.perihal,
-      lampiran: data.lampiran,
-      isiRingkas: data.isiRingkas,
-      tembusan: data.tembusan,
-      file: data.file,
-      subjek: data.subjek,
-      bulan: data.bulan,
-      tanggal: now.toISOString(),
-      masaRetensiHari: data.masaRetensiHari,
-      tanggalRetensi: retDate.toISOString(),
-      status: 'aktif',
-      aksiPenyusutan: null,
-      tanggalAksi: null,
-      catatanGuru: '',
-      nilai: '',
-      nilaiAngka: null,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    };
-    skipNextStorageEvent.current = true;
-    setState((prev) => ({ ...prev, arsip: [newArsip, ...prev.arsip] }));
-    return newArsip;
-  }, [currentUser]);
+  const addArsip = useCallback<AppContextValue['addArsip']>(
+    async (data: ArsipInput) => {
+      const now = new Date();
+      const retDate = new Date(now);
+      retDate.setDate(retDate.getDate() + data.masaRetensiHari);
+      const tempId = uid('ar');
 
-  const updateArsip = useCallback((id: string, patch: Partial<Arsip>) => {
+      const siswaId = currentUser?.siswaId ?? 'unknown';
+      const siswaName = currentUser?.name ?? 'Siswa';
+
+      if (isSupabaseConfigured && currentUser?.role === 'siswa') {
+        const payload = {
+          siswa_id: siswaId,
+          siswa_name: siswaName,
+          nomor_dokumen: data.nomorDokumen,
+          nama_berkas: data.namaBerkas,
+          jenis_dokumen: data.jenisDokumen,
+          pengirim: data.pengirim,
+          penerima: data.penerima,
+          perihal: data.perihal,
+          lampiran: data.lampiran,
+          isi_ringkas: data.isiRingkas,
+          tembusan: data.tembusan,
+          file_name: data.file?.name ?? null,
+          file_size: data.file?.size ?? null,
+          file_type: data.file?.type ?? null,
+          file_data_url: data.file?.dataUrl ?? null,
+          subjek: data.subjek,
+          bulan: data.bulan,
+          tanggal: now.toISOString(),
+          masa_retensi_hari: data.masaRetensiHari,
+          tanggal_retensi: retDate.toISOString(),
+          status: 'aktif',
+          aksi_penyusutan: null,
+          tanggal_aksi: null,
+          catatan_guru: '',
+          nilai: '',
+          nilai_angka: null,
+        };
+
+        const { data: inserted, error } = await supabase
+          .from('arsip')
+          .insert(payload)
+          .select()
+          .single();
+
+        if (error || !inserted) {
+          console.error('Error inserting arsip to Supabase:', error);
+          throw new Error(error?.message || 'Gagal menyimpan arsip ke database Supabase.');
+        }
+
+        const newArsip = mapRowToArsip(inserted);
+        skipNextStorageEvent.current = true;
+        setState((prev) => ({
+          ...prev,
+          arsip: [newArsip, ...prev.arsip.filter((a) => a.id !== newArsip.id)],
+        }));
+        return newArsip;
+      }
+
+      // Offline / Local fallback if Supabase is not configured
+      const fallbackArsip: Arsip = {
+        id: tempId,
+        siswaId,
+        siswaName,
+        nomorDokumen: data.nomorDokumen,
+        namaBerkas: data.namaBerkas,
+        jenisDokumen: data.jenisDokumen,
+        pengirim: data.pengirim,
+        penerima: data.penerima,
+        perihal: data.perihal,
+        lampiran: data.lampiran,
+        isiRingkas: data.isiRingkas,
+        tembusan: data.tembusan,
+        file: data.file,
+        subjek: data.subjek,
+        bulan: data.bulan,
+        tanggal: now.toISOString(),
+        masaRetensiHari: data.masaRetensiHari,
+        tanggalRetensi: retDate.toISOString(),
+        status: 'aktif',
+        aksiPenyusutan: null,
+        tanggalAksi: null,
+        catatanGuru: '',
+        nilai: '',
+        nilaiAngka: null,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      skipNextStorageEvent.current = true;
+      setState((prev) => ({ ...prev, arsip: [fallbackArsip, ...prev.arsip] }));
+      return fallbackArsip;
+    },
+    [currentUser]
+  );
+
+  const updateArsip = useCallback(async (id: string, patch: Partial<Arsip>) => {
+    const nowIso = new Date().toISOString();
     skipNextStorageEvent.current = true;
     setState((prev) => ({
       ...prev,
       arsip: prev.arsip.map((a) =>
-        a.id === id
-          ? { ...a, ...patch, updatedAt: new Date().toISOString() }
-          : a
+        a.id === id ? { ...a, ...patch, updatedAt: nowIso } : a
       ),
     }));
+
+    if (isSupabaseConfigured) {
+      const dbPatch: any = {};
+      if (patch.subjek !== undefined) dbPatch.subjek = patch.subjek;
+      if (patch.bulan !== undefined) dbPatch.bulan = patch.bulan;
+      if (patch.status !== undefined) dbPatch.status = patch.status;
+      if (patch.aksiPenyusutan !== undefined) dbPatch.aksi_penyusutan = patch.aksiPenyusutan;
+      if (patch.tanggalAksi !== undefined) dbPatch.tanggal_aksi = patch.tanggalAksi;
+      if (patch.catatanGuru !== undefined) dbPatch.catatan_guru = patch.catatanGuru;
+      if (patch.nilai !== undefined) dbPatch.nilai = patch.nilai;
+      if (patch.nilaiAngka !== undefined) dbPatch.nilai_angka = patch.nilaiAngka;
+
+      if (Object.keys(dbPatch).length > 0) {
+        dbPatch.updated_at = nowIso;
+        const { error } = await supabase.from('arsip').update(dbPatch).eq('id', id);
+        if (error) {
+          console.error('Error updating arsip in Supabase:', error);
+        }
+      }
+    }
   }, []);
 
-  const deleteArsip = useCallback((id: string) => {
+  const deleteArsip = useCallback(async (id: string) => {
     skipNextStorageEvent.current = true;
     setState((prev) => ({ ...prev, arsip: prev.arsip.filter((a) => a.id !== id) }));
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from('arsip').delete().eq('id', id);
+      if (error) {
+        console.error('Error deleting arsip in Supabase:', error);
+      }
+    }
   }, []);
 
   const setAksiPenyusutan = useCallback(
-    (id: string, aksi: 'pindah_inaktif' | 'antre_pemusnahan') => {
+    async (id: string, aksi: 'pindah_inaktif' | 'antre_pemusnahan') => {
       const newStatus: RetensiStatus =
         aksi === 'pindah_inaktif' ? 'inaktif' : 'antre_pemusnahan';
+      const nowIso = new Date().toISOString();
       skipNextStorageEvent.current = true;
       setState((prev) => ({
         ...prev,
@@ -325,17 +495,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 ...a,
                 aksiPenyusutan: aksi,
                 status: newStatus,
-                tanggalAksi: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
+                tanggalAksi: nowIso,
+                updatedAt: nowIso,
               }
             : a
         ),
       }));
+
+      if (isSupabaseConfigured) {
+        const { error } = await supabase
+          .from('arsip')
+          .update({
+            status: newStatus,
+            aksi_penyusutan: aksi,
+            tanggal_aksi: nowIso,
+            updated_at: nowIso,
+          })
+          .eq('id', id);
+        if (error) {
+          console.error('Error updating status retensi in Supabase:', error);
+        }
+      }
     },
     []
   );
 
-  const prosesPemusnahan = useCallback((id: string) => {
+  const prosesPemusnahan = useCallback(async (id: string) => {
+    const nowIso = new Date().toISOString();
     skipNextStorageEvent.current = true;
     setState((prev) => ({
       ...prev,
@@ -345,16 +531,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
               ...a,
               status: 'dimusnahkan',
               aksiPenyusutan: 'antre_pemusnahan',
-              tanggalAksi: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
+              tanggalAksi: nowIso,
+              updatedAt: nowIso,
             }
           : a
       ),
     }));
+
+    if (isSupabaseConfigured) {
+      const { error } = await supabase
+        .from('arsip')
+        .update({
+          status: 'dimusnahkan',
+          aksi_penyusutan: 'antre_pemusnahan',
+          tanggal_aksi: nowIso,
+          updated_at: nowIso,
+        })
+        .eq('id', id);
+      if (error) {
+        console.error('Error processing pemusnahan in Supabase:', error);
+      }
+    }
   }, []);
 
   const setNilai = useCallback(
-    (id: string, nilaiAngka: number | null, catatan: string) => {
+    async (id: string, nilaiAngka: number | null, catatan: string) => {
+      const nowIso = new Date().toISOString();
+      const nilaiHuruf = getNilaiHuruf(nilaiAngka);
       skipNextStorageEvent.current = true;
       setState((prev) => ({
         ...prev,
@@ -363,12 +566,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ? {
                 ...a,
                 nilaiAngka,
+                nilai: nilaiHuruf,
                 catatanGuru: catatan,
-                updatedAt: new Date().toISOString(),
+                updatedAt: nowIso,
               }
             : a
         ),
       }));
+
+      if (isSupabaseConfigured) {
+        const { error } = await supabase
+          .from('arsip')
+          .update({
+            nilai_angka: nilaiAngka,
+            nilai: nilaiHuruf,
+            catatan_guru: catatan,
+            updated_at: nowIso,
+          })
+          .eq('id', id);
+        if (error) {
+          console.error('Error updating nilai in Supabase:', error);
+        }
+      }
     },
     []
   );
@@ -410,6 +629,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       prosesPemusnahan,
       setNilai,
       getArsipBySiswa,
+      refreshData: fetchSupabaseData,
       lastSync,
     }),
     [
@@ -426,6 +646,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       prosesPemusnahan,
       setNilai,
       getArsipBySiswa,
+      fetchSupabaseData,
       lastSync,
     ]
   );

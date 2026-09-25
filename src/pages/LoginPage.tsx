@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Archive, GraduationCap, KeyRound, LogIn, User } from 'lucide-react';
+import { Archive, GraduationCap, KeyRound, LogIn, User, AlertTriangle } from 'lucide-react';
 import { useApp } from '../AppContext';
+import { isSupabaseConfigured } from '../lib/supabase';
 
 export default function LoginPage() {
   const { login } = useApp();
@@ -129,6 +130,18 @@ export default function LoginPage() {
                 />
               </div>
             </div>
+
+            {!isSupabaseConfigured && (
+              <div className="rounded-xl bg-amber-50 text-amber-900 text-xs p-3.5 ring-1 ring-amber-300 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Konfigurasi Supabase Belum Terhubung</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-amber-700">
+                  Project di Vercel belum memiliki Environment Variables Supabase. Tambahkan <code className="bg-amber-100 px-1 py-0.5 rounded font-mono">VITE_SUPABASE_URL</code> dan <code className="bg-amber-100 px-1 py-0.5 rounded font-mono">VITE_SUPABASE_ANON_KEY</code> di Vercel Dashboard (Project Settings &rarr; Environment Variables) lalu Redeploy.
+                </p>
+              </div>
+            )}
 
             {error && (
               <div className="rounded-xl bg-red-50 text-red-700 text-sm px-3.5 py-2.5 ring-1 ring-red-200 animate-scale-in">
