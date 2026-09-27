@@ -6,7 +6,8 @@ export type StageKey =
   | 'digitalisasi'
   | 'penyimpanan'
   | 'penyusutan'
-  | 'pemusnahan';
+  | 'pemusnahan'
+  | 'penilaian';
 
 export type DocType =
   | 'Surat Masuk'
@@ -124,6 +125,11 @@ export const STAGE_META: Record<
     label: 'Pemusnahan Arsip',
     desc: 'Proses pemusnahan arsip',
     icon: 'Trash2',
+  },
+  penilaian: {
+    label: 'Hasil Penilaian',
+    desc: 'Lihat nilai dan catatan evaluasi dari guru',
+    icon: 'Award',
   },
 };
 

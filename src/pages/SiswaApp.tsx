@@ -4,6 +4,7 @@ import {
   FolderTree,
   Hourglass,
   Trash2,
+  Award,
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { STAGE_META, type StageKey } from '../types';
@@ -11,14 +12,16 @@ import DigitalisasiPage from './siswa/DigitalisasiPage';
 import PenyimpananPage from './siswa/PenyimpananPage';
 import PenyusutanPage from './siswa/PenyusutanPage';
 import PemusnahanPage from './siswa/PemusnahanPage';
+import HasilPenilaianPage from './siswa/HasilPenilaianPage';
 
-const STAGES: StageKey[] = ['digitalisasi', 'penyimpanan', 'penyusutan', 'pemusnahan'];
+const STAGES: StageKey[] = ['digitalisasi', 'penyimpanan', 'penyusutan', 'pemusnahan', 'penilaian'];
 
 const ICONS = {
   digitalisasi: ScanLine,
   penyimpanan: FolderTree,
   penyusutan: Hourglass,
   pemusnahan: Trash2,
+  penilaian: Award,
 };
 
 export default function SiswaApp() {
@@ -46,6 +49,7 @@ export default function SiswaApp() {
       {active === 'penyimpanan' && <PenyimpananPage />}
       {active === 'penyusutan' && <PenyusutanPage />}
       {active === 'pemusnahan' && <PemusnahanPage />}
+      {active === 'penilaian' && <HasilPenilaianPage />}
     </AppShell>
   );
 }
