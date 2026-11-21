@@ -16,6 +16,11 @@ import type {
   Siswa,
 } from './types';
 import {
+  calculateRetensi,
+  getTodayDateString,
+  NILAI_GUNA_OPTIONS,
+} from './types';
+import {
   STORAGE_KEY,
   computeRetensiStatus,
   getNilaiHuruf,
@@ -60,6 +65,7 @@ function mapRowToArsip(row: any): Arsip {
     nomorDokumen: row.nomor_dokumen || '',
     namaBerkas: row.nama_berkas || '',
     jenisDokumen: row.jenis_dokumen,
+    tanggalSurat: row.tanggal_surat || null,
     pengirim: row.pengirim || '',
     penerima: row.penerima || '',
     perihal: row.perihal || '',
@@ -68,15 +74,16 @@ function mapRowToArsip(row: any): Arsip {
     tembusan: row.tembusan || '',
     file: row.file_name
       ? {
-          name: row.file_name,
-          size: Number(row.file_size) || 0,
-          type: row.file_type || '',
-          dataUrl: row.file_data_url || '',
-        }
+        name: row.file_name,
+        size: Number(row.file_size) || 0,
+        type: row.file_type || '',
+        dataUrl: row.file_data_url || '',
+      }
       : null,
     subjek: row.subjek || '',
     bulan: row.bulan || '',
     tanggal: row.tanggal || row.created_at,
+    nilaiGuna: row.nilai_guna || null,
     masaRetensiHari: row.masa_retensi_hari ?? 30,
     tanggalRetensi: row.tanggal_retensi || '',
     status: row.status || 'aktif',
@@ -346,8 +353,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addArsip = useCallback<AppContextValue['addArsip']>(
     async (data: ArsipInput) => {
       const now = new Date();
-      const retDate = new Date(now);
-      retDate.setDate(retDate.getDate() + data.masaRetensiHari);
+      const todayStr = getTodayDateString();
+
+      // Validasi tanggal surat tidak boleh lebih besar dari tanggal digitalisasi
+      if (data.tanggalSurat && data.tanggalSurat > todayStr) {
+        throw new Error('Tanggal surat tidak boleh melebihi tanggal hari ini (tanggal digitalisasi).');
+      }
+
+      // Hitung tanggal akhir retensi dan masa retensi hari berdasarkan tanggal surat dan nilai guna
+      const opt = NILAI_GUNA_OPTIONS.find((o) => o.kategori === data.nilaiGuna);
+      const tahunKalender = opt ? opt.tahun : Math.max(1, Math.round(data.masaRetensiHari / 365));
+      const { tanggalRetensi: calculatedTanggalRetensi, masaRetensiHari: calculatedHari } =
+        data.tanggalSurat && opt
+          ? calculateRetensi(data.tanggalSurat, tahunKalender)
+          : {
+              tanggalRetensi: new Date(now.getTime() + (data.masaRetensiHari || 30) * 86400000).toISOString(),
+              masaRetensiHari: data.masaRetensiHari || 30,
+            };
+
+      const finalMasaRetensiHari = calculatedHari || data.masaRetensiHari || 30;
+      const finalTanggalRetensi = calculatedTanggalRetensi;
       const tempId = uid('ar');
 
       const siswaId = currentUser?.siswaId ?? 'unknown';
@@ -360,6 +385,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           nomor_dokumen: data.nomorDokumen,
           nama_berkas: data.namaBerkas,
           jenis_dokumen: data.jenisDokumen,
+          tanggal_surat: data.tanggalSurat || null,
           pengirim: data.pengirim,
           penerima: data.penerima,
           perihal: data.perihal,
@@ -373,8 +399,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           subjek: data.subjek,
           bulan: data.bulan,
           tanggal: now.toISOString(),
-          masa_retensi_hari: data.masaRetensiHari,
-          tanggal_retensi: retDate.toISOString(),
+          nilai_guna: data.nilaiGuna || null,
+          masa_retensi_hari: finalMasaRetensiHari,
+          tanggal_retensi: finalTanggalRetensi,
           status: 'aktif',
           aksi_penyusutan: null,
           tanggal_aksi: null,
@@ -391,6 +418,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         if (error || !inserted) {
           console.error('Error inserting arsip to Supabase:', error);
+          if (
+            error &&
+            (error.message?.includes('tanggal_surat') ||
+              error.message?.includes('nilai_guna') ||
+              error.details?.includes('tanggal_surat') ||
+              error.details?.includes('nilai_guna'))
+          ) {
+            throw new Error(
+              'Penyimpanan belum dapat dilakukan karena database belum diperbarui. Silakan hubungi guru.'
+            );
+          }
           throw new Error(error?.message || 'Gagal menyimpan arsip ke database Supabase.');
         }
 
@@ -411,6 +449,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         nomorDokumen: data.nomorDokumen,
         namaBerkas: data.namaBerkas,
         jenisDokumen: data.jenisDokumen,
+        tanggalSurat: data.tanggalSurat || null,
         pengirim: data.pengirim,
         penerima: data.penerima,
         perihal: data.perihal,
@@ -421,8 +460,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         subjek: data.subjek,
         bulan: data.bulan,
         tanggal: now.toISOString(),
-        masaRetensiHari: data.masaRetensiHari,
-        tanggalRetensi: retDate.toISOString(),
+        nilaiGuna: data.nilaiGuna || null,
+        masaRetensiHari: finalMasaRetensiHari,
+        tanggalRetensi: finalTanggalRetensi,
         status: 'aktif',
         aksiPenyusutan: null,
         tanggalAksi: null,
@@ -492,12 +532,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         arsip: prev.arsip.map((a) =>
           a.id === id
             ? {
-                ...a,
-                aksiPenyusutan: aksi,
-                status: newStatus,
-                tanggalAksi: nowIso,
-                updatedAt: nowIso,
-              }
+              ...a,
+              aksiPenyusutan: aksi,
+              status: newStatus,
+              tanggalAksi: nowIso,
+              updatedAt: nowIso,
+            }
             : a
         ),
       }));
@@ -528,12 +568,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       arsip: prev.arsip.map((a) =>
         a.id === id
           ? {
-              ...a,
-              status: 'dimusnahkan',
-              aksiPenyusutan: 'antre_pemusnahan',
-              tanggalAksi: nowIso,
-              updatedAt: nowIso,
-            }
+            ...a,
+            status: 'dimusnahkan',
+            aksiPenyusutan: 'antre_pemusnahan',
+            tanggalAksi: nowIso,
+            updatedAt: nowIso,
+          }
           : a
       ),
     }));
@@ -564,12 +604,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         arsip: prev.arsip.map((a) =>
           a.id === id
             ? {
-                ...a,
-                nilaiAngka,
-                nilai: nilaiHuruf,
-                catatanGuru: catatan,
-                updatedAt: nowIso,
-              }
+              ...a,
+              nilaiAngka,
+              nilai: nilaiHuruf,
+              catatanGuru: catatan,
+              updatedAt: nowIso,
+            }
             : a
         ),
       }));

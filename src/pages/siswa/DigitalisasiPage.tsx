@@ -13,10 +13,14 @@ import {
   BULAN_OPTIONS,
   DOC_TYPES,
   SUBJEK_OPTIONS,
+  NILAI_GUNA_OPTIONS,
+  getTodayDateString,
+  calculateRetensi,
   type ArsipFile,
   type DocType,
+  type NilaiGunaKategori,
 } from '../../types';
-import { formatFileSize } from '../../lib/storage';
+import { formatFileSize, formatTanggal } from '../../lib/storage';
 
 const ACCEPTED = '.pdf,.jpg,.jpeg,.png';
 const MAX_FILE = 5 * 1024 * 1024; // 5MB
@@ -43,6 +47,7 @@ export default function DigitalisasiPage() {
     nomorDokumen: '',
     namaBerkas: '',
     jenisDokumen: 'Surat Masuk' as DocType,
+    tanggalSurat: '',
     pengirim: '',
     penerima: '',
     perihal: '',
@@ -51,8 +56,10 @@ export default function DigitalisasiPage() {
     tembusan: '',
     subjek: SUBJEK_OPTIONS[0],
     bulan: BULAN_OPTIONS[new Date().getMonth()],
-    masaRetensiHari: 30,
+    nilaiGuna: '' as NilaiGunaKategori | '',
+    masaRetensiHari: 0,
   });
+  const [previewTanggalRetensi, setPreviewTanggalRetensi] = useState<string>('');
 
   const handleFile = async (f: File | null) => {
     if (!f) return;
@@ -90,15 +97,61 @@ export default function DigitalisasiPage() {
   const set = (k: keyof typeof form, v: string | number) =>
     setForm((prev) => ({ ...prev, [k]: v }));
 
+  const handleTanggalSuratChange = (tgl: string) => {
+    setForm((prev) => {
+      const updated = { ...prev, tanggalSurat: tgl };
+      if (tgl && updated.nilaiGuna) {
+        const opt = NILAI_GUNA_OPTIONS.find((o) => o.kategori === updated.nilaiGuna);
+        if (opt) {
+          const res = calculateRetensi(tgl, opt.tahun);
+          updated.masaRetensiHari = res.masaRetensiHari;
+          setPreviewTanggalRetensi(res.tanggalRetensi);
+        }
+      } else {
+        updated.masaRetensiHari = 0;
+        setPreviewTanggalRetensi('');
+      }
+      return updated;
+    });
+  };
+
+  const handleNilaiGunaChange = (kategori: NilaiGunaKategori | '') => {
+    setForm((prev) => {
+      const updated = { ...prev, nilaiGuna: kategori };
+      if (updated.tanggalSurat && kategori) {
+        const opt = NILAI_GUNA_OPTIONS.find((o) => o.kategori === kategori);
+        if (opt) {
+          const res = calculateRetensi(updated.tanggalSurat, opt.tahun);
+          updated.masaRetensiHari = res.masaRetensiHari;
+          setPreviewTanggalRetensi(res.tanggalRetensi);
+        }
+      } else {
+        updated.masaRetensiHari = 0;
+        setPreviewTanggalRetensi('');
+      }
+      return updated;
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!form.nomorDokumen.trim()) return setError('Nomor dokumen wajib diisi.');
     if (!file) return setError('Berkas dokumen wajib diunggah.');
+    if (!form.tanggalSurat) return setError('Tanggal surat wajib diisi.');
+
+    const todayStr = getTodayDateString();
+    if (form.tanggalSurat > todayStr) {
+      return setError('Tanggal surat tidak boleh melebihi tanggal hari ini (tanggal digitalisasi).');
+    }
+
+    if (!form.nilaiGuna) return setError('Nilai guna arsip wajib dipilih.');
+
     setSaving(true);
     try {
       await addArsip({
         ...form,
+        nilaiGuna: form.nilaiGuna as NilaiGunaKategori,
         file,
       });
       setSaved(true);
@@ -107,6 +160,7 @@ export default function DigitalisasiPage() {
         nomorDokumen: '',
         namaBerkas: '',
         jenisDokumen: 'Surat Masuk',
+        tanggalSurat: '',
         pengirim: '',
         penerima: '',
         perihal: '',
@@ -115,8 +169,10 @@ export default function DigitalisasiPage() {
         tembusan: '',
         subjek: SUBJEK_OPTIONS[0],
         bulan: BULAN_OPTIONS[new Date().getMonth()],
-        masaRetensiHari: 30,
+        nilaiGuna: '',
+        masaRetensiHari: 0,
       });
+      setPreviewTanggalRetensi('');
       removeFile();
       setTimeout(() => setSaved(false), 3500);
     } catch (err: any) {
@@ -270,6 +326,16 @@ export default function DigitalisasiPage() {
               </select>
             </div>
             <div>
+              <label className="label">Tanggal Surat *</label>
+              <input
+                type="date"
+                className="input"
+                max={getTodayDateString()}
+                value={form.tanggalSurat}
+                onChange={(e) => handleTanggalSuratChange(e.target.value)}
+              />
+            </div>
+            <div>
               <label className="label">Pengirim</label>
               <input
                 className="input"
@@ -326,9 +392,14 @@ export default function DigitalisasiPage() {
             />
           </div>
 
-          {/* Klasifikasi awal */}
+          {/* Klasifikasi & Penentuan Retensi */}
           <div className="rounded-2xl bg-ink-50 border border-ink-100 p-4 space-y-4">
-            <p className="text-sm font-semibold text-ink-700">Klasifikasi Awal</p>
+            <div>
+              <p className="text-sm font-semibold text-ink-700">Klasifikasi & Penentuan Retensi</p>
+              <p className="text-xs text-ink-500 mt-0.5">
+                Tentukan folder klasifikasi dan kategori nilai guna arsip. Masa retensi dihitung otomatis dari tanggal surat.
+              </p>
+            </div>
             <div className="grid sm:grid-cols-3 gap-4">
               <div>
                 <label className="label">Folder Utama (Subjek)</label>
@@ -355,16 +426,43 @@ export default function DigitalisasiPage() {
                 </select>
               </div>
               <div>
-                <label className="label">Masa Retensi (hari)</label>
-                <input
-                  type="number"
-                  min={1}
+                <label className="label">Nilai Guna Arsip *</label>
+                <select
                   className="input"
-                  value={form.masaRetensiHari}
-                  onChange={(e) => set('masaRetensiHari', Math.max(1, Number(e.target.value) || 1))}
-                />
+                  value={form.nilaiGuna}
+                  onChange={(e) => handleNilaiGunaChange(e.target.value as NilaiGunaKategori | '')}
+                >
+                  <option value="">-- Pilih Nilai Guna Arsip --</option>
+                  {NILAI_GUNA_OPTIONS.map((opt) => (
+                    <option key={opt.kategori} value={opt.kategori}>
+                      {opt.deskripsi}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
+
+            {/* Banner preview tanggal retensi otomatis */}
+            {form.nilaiGuna && form.tanggalSurat && previewTanggalRetensi ? (
+              <div className="rounded-xl bg-brand-50 border border-brand-200 p-3.5 flex items-center justify-between flex-wrap gap-2 text-xs">
+                <div>
+                  <span className="font-semibold text-brand-900">Masa Retensi: </span>
+                  <span className="text-brand-700">
+                    {NILAI_GUNA_OPTIONS.find((o) => o.kategori === form.nilaiGuna)?.tahun} Tahun ({form.masaRetensiHari} hari kalender)
+                  </span>
+                </div>
+                <div>
+                  <span className="font-semibold text-brand-900">Jatuh Tempo Retensi: </span>
+                  <span className="font-bold text-brand-700">{formatTanggal(previewTanggalRetensi)}</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-ink-400 italic">
+                {!form.tanggalSurat
+                  ? '* Isi Tanggal Surat pada formulir Identitas Arsip terlebih dahulu.'
+                  : '* Pilih kategori nilai guna untuk menghitung masa retensi dan tanggal jatuh tempo secara otomatis.'}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center justify-between pt-2">

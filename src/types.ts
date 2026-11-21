@@ -28,6 +28,76 @@ export type RetensiStatus =
 
 export type RetensiAction = 'pindah_inaktif' | 'antre_pemusnahan' | null;
 
+export type NilaiGunaKategori =
+  | 'Administrasi'
+  | 'Hukum, informasi, ilmiah, dan teknologi'
+  | 'Pertanggungjawaban keuangan';
+
+export interface NilaiGunaOption {
+  kategori: NilaiGunaKategori;
+  tahun: number;
+  deskripsi: string;
+}
+
+export const NILAI_GUNA_OPTIONS: NilaiGunaOption[] = [
+  {
+    kategori: 'Administrasi',
+    tahun: 2,
+    deskripsi: 'Administrasi (2 Tahun)',
+  },
+  {
+    kategori: 'Hukum, informasi, ilmiah, dan teknologi',
+    tahun: 5,
+    deskripsi: 'Hukum, Informasi, Ilmiah, & Teknologi (5 Tahun)',
+  },
+  {
+    kategori: 'Pertanggungjawaban keuangan',
+    tahun: 10,
+    deskripsi: 'Pertanggungjawaban Keuangan (10 Tahun)',
+  },
+];
+
+/**
+ * Mendapatkan string tanggal hari ini dalam format YYYY-MM-DD (waktu lokal)
+ */
+export function getTodayDateString(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Menghitung tanggal akhir retensi dan jumlah hari kalender dari tanggal surat.
+ * Menggunakan normalisasi UTC untuk mencegah selisih akibat perbedaan zona waktu atau DST.
+ */
+export function calculateRetensi(
+  tanggalSuratStr: string,
+  tahunKalender: number
+): { tanggalRetensi: string; masaRetensiHari: number } {
+  const [year, month, day] = tanggalSuratStr.split('-').map(Number);
+  const targetYear = year + tahunKalender;
+
+  // Cek apakah tahun target adalah tahun kabisat
+  const isLeapTarget =
+    (targetYear % 4 === 0 && targetYear % 100 !== 0) || targetYear % 400 === 0;
+
+  // Jika tanggal surat adalah 29 Februari dan tahun target bukan kabisat, sesuaikan ke 28 Februari
+  const adjustedDay = month === 2 && day === 29 && !isLeapTarget ? 28 : day;
+
+  // Normalisasi jam ke 12:00:00 UTC untuk menghindari pergeseran tanggal akibat zona waktu
+  const baseUtc = Date.UTC(year, month - 1, day, 12, 0, 0, 0);
+  const retUtc = Date.UTC(targetYear, month - 1, adjustedDay, 12, 0, 0, 0);
+
+  const diffDays = Math.round((retUtc - baseUtc) / (1000 * 60 * 60 * 24));
+
+  return {
+    tanggalRetensi: new Date(retUtc).toISOString(),
+    masaRetensiHari: diffDays,
+  };
+}
+
 export interface ArsipFile {
   name: string;
   size: number;
@@ -42,6 +112,7 @@ export interface Arsip {
   nomorDokumen: string;
   namaBerkas: string;
   jenisDokumen: DocType;
+  tanggalSurat?: string | null; // YYYY-MM-DD dokumen asli
   pengirim: string;
   penerima: string;
   perihal: string;
@@ -52,8 +123,9 @@ export interface Arsip {
   // klasifikasi
   subjek: string;
   bulan: string;
-  tanggal: string; // ISO date string (createdAt)
+  tanggal: string; // ISO date string (tanggal digitalisasi otomatis)
   // retensi
+  nilaiGuna?: NilaiGunaKategori | string | null;
   masaRetensiHari: number;
   tanggalRetensi: string; // ISO date string
   status: RetensiStatus;
@@ -83,6 +155,7 @@ export interface ArsipInput {
   nomorDokumen: string;
   namaBerkas: string;
   jenisDokumen: DocType;
+  tanggalSurat: string;
   pengirim: string;
   penerima: string;
   perihal: string;
@@ -92,6 +165,7 @@ export interface ArsipInput {
   file: ArsipFile | null;
   subjek: string;
   bulan: string;
+  nilaiGuna: NilaiGunaKategori;
   masaRetensiHari: number;
 }
 

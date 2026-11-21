@@ -80,18 +80,16 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => { setRole('siswa'); setError(null); }}
-              className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
-                role === 'siswa' ? 'bg-white text-brand-700 shadow-soft' : 'text-ink-500 hover:text-ink-700'
-              }`}
+              className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${role === 'siswa' ? 'bg-white text-brand-700 shadow-soft' : 'text-ink-500 hover:text-ink-700'
+                }`}
             >
               <User className="w-4 h-4" /> Siswa
             </button>
             <button
               type="button"
               onClick={() => { setRole('guru'); setError(null); }}
-              className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
-                role === 'guru' ? 'bg-white text-brand-700 shadow-soft' : 'text-ink-500 hover:text-ink-700'
-              }`}
+              className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${role === 'guru' ? 'bg-white text-brand-700 shadow-soft' : 'text-ink-500 hover:text-ink-700'
+                }`}
             >
               <GraduationCap className="w-4 h-4" /> Guru
             </button>
