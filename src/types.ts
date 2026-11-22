@@ -24,9 +24,15 @@ export type RetensiStatus =
   | 'menjelang'
   | 'inaktif'
   | 'antre_pemusnahan'
-  | 'dimusnahkan';
+  | 'dimusnahkan'
+  | 'dipindahkan';
 
-export type RetensiAction = 'pindah_inaktif' | 'antre_pemusnahan' | null;
+export type RetensiAction =
+  | 'pindah_inaktif'
+  | 'antre_pemusnahan'
+  | 'penghapusan'
+  | 'pemindahan'
+  | null;
 
 export type NilaiGunaKategori =
   | 'Administrasi'

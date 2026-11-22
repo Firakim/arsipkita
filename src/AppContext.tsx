@@ -46,6 +46,7 @@ interface AppContextValue {
   deleteArsip: (id: string) => Promise<void> | void;
   setAksiPenyusutan: (id: string, aksi: 'pindah_inaktif' | 'antre_pemusnahan') => Promise<void> | void;
   prosesPemusnahan: (id: string) => Promise<void> | void;
+  prosesPemindahan: (id: string) => Promise<void> | void;
   setNilai: (id: string, nilaiAngka: number | null, catatan: string) => Promise<void> | void;
   getArsipBySiswa: (siswaId: string) => Arsip[];
   refreshData: () => Promise<void>;
@@ -523,6 +524,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const setAksiPenyusutan = useCallback(
     async (id: string, aksi: 'pindah_inaktif' | 'antre_pemusnahan') => {
+      const target = state.arsip.find((a) => a.id === id);
+      if (aksi === 'antre_pemusnahan' && target && target.status !== 'inaktif') {
+        throw new Error('Hanya arsip inaktif yang dapat dimasukkan ke antrean pemusnahan.');
+      }
       const newStatus: RetensiStatus =
         aksi === 'pindah_inaktif' ? 'inaktif' : 'antre_pemusnahan';
       const nowIso = new Date().toISOString();
@@ -557,7 +562,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    []
+    [state.arsip]
   );
 
   const prosesPemusnahan = useCallback(async (id: string) => {
@@ -570,7 +575,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? {
             ...a,
             status: 'dimusnahkan',
-            aksiPenyusutan: 'antre_pemusnahan',
+            aksiPenyusutan: 'penghapusan',
             tanggalAksi: nowIso,
             updatedAt: nowIso,
           }
@@ -583,13 +588,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .from('arsip')
         .update({
           status: 'dimusnahkan',
-          aksi_penyusutan: 'antre_pemusnahan',
+          aksi_penyusutan: 'penghapusan',
           tanggal_aksi: nowIso,
           updated_at: nowIso,
         })
         .eq('id', id);
       if (error) {
         console.error('Error processing pemusnahan in Supabase:', error);
+      }
+    }
+  }, []);
+
+  const prosesPemindahan = useCallback(async (id: string) => {
+    const nowIso = new Date().toISOString();
+    skipNextStorageEvent.current = true;
+    setState((prev) => ({
+      ...prev,
+      arsip: prev.arsip.map((a) =>
+        a.id === id
+          ? {
+            ...a,
+            status: 'dipindahkan',
+            aksiPenyusutan: 'pemindahan',
+            tanggalAksi: nowIso,
+            updatedAt: nowIso,
+          }
+          : a
+      ),
+    }));
+
+    if (isSupabaseConfigured) {
+      const { error } = await supabase
+        .from('arsip')
+        .update({
+          status: 'dipindahkan',
+          aksi_penyusutan: 'pemindahan',
+          tanggal_aksi: nowIso,
+          updated_at: nowIso,
+        })
+        .eq('id', id);
+      if (error) {
+        console.error('Error processing pemindahan in Supabase:', error);
       }
     }
   }, []);
@@ -667,6 +706,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deleteArsip,
       setAksiPenyusutan,
       prosesPemusnahan,
+      prosesPemindahan,
       setNilai,
       getArsipBySiswa,
       refreshData: fetchSupabaseData,
@@ -684,6 +724,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deleteArsip,
       setAksiPenyusutan,
       prosesPemusnahan,
+      prosesPemindahan,
       setNilai,
       getArsipBySiswa,
       fetchSupabaseData,

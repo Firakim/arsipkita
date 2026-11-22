@@ -6,6 +6,7 @@ export const STATUS_LABEL: Record<RetensiStatus, string> = {
   inaktif: 'Arsip Inaktif',
   antre_pemusnahan: 'Antre Pemusnahan',
   dimusnahkan: 'Dimusnahkan',
+  dipindahkan: 'Dipindahkan',
 };
 
 export const STATUS_STYLE: Record<RetensiStatus, string> = {
@@ -14,6 +15,7 @@ export const STATUS_STYLE: Record<RetensiStatus, string> = {
   inaktif: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',
   antre_pemusnahan: 'bg-orange-50 text-orange-700 ring-1 ring-orange-200',
   dimusnahkan: 'bg-ink-100 text-ink-500 ring-1 ring-ink-200 line-through',
+  dipindahkan: 'bg-purple-50 text-purple-700 ring-1 ring-purple-200',
 };
 
 export function StatusBadge({ status }: { status: RetensiStatus }) {

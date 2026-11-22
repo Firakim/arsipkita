@@ -14,7 +14,12 @@ export function computeRetensiStatus(
   status: RetensiStatus,
   tanggalRetensi: string
 ): RetensiStatus {
-  if (status === 'inaktif' || status === 'antre_pemusnahan' || status === 'dimusnahkan') {
+  if (
+    status === 'inaktif' ||
+    status === 'antre_pemusnahan' ||
+    status === 'dimusnahkan' ||
+    status === 'dipindahkan'
+  ) {
     return status;
   }
   const days = getDaysUntilRetensi(tanggalRetensi);
@@ -77,7 +82,7 @@ export function getStageProgress(arsipList: Arsip[]) {
   const penyusutan = arsipList.filter(
     (a) => a.aksiPenyusutan !== null || a.status === 'inaktif' || a.status === 'antre_pemusnahan'
   ).length;
-  const pemusnahan = arsipList.filter((a) => a.status === 'dimusnahkan').length;
+  const pemusnahan = arsipList.filter((a) => a.status === 'dimusnahkan' || a.status === 'dipindahkan').length;
 
   return {
     digitalisasi: Math.round((digitalisasi / total) * 100),
