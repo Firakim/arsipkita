@@ -277,16 +277,16 @@ export default function PenyimpananPage() {
       {/* Modal Detail Arsip */}
       {detailArsip && (
         <div
-          className="fixed inset-0 z-50 bg-ink-950/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+          className="fixed inset-0 z-50 bg-ink-950/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in"
           onClick={() => setDetailArsip(null)}
         >
           <div
-            className="bg-white rounded-2xl shadow-pop max-w-2xl w-full max-h-[90vh] flex flex-col animate-scale-in overflow-hidden"
+            className="bg-white rounded-2xl shadow-pop max-w-2xl w-full max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] flex flex-col animate-scale-in overflow-hidden my-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-ink-100 bg-ink-50/50">
-              <div className="flex items-center gap-2 min-w-0">
+            <div className="shrink-0 flex items-center justify-between px-5 sm:px-6 py-4 border-b border-ink-100 bg-ink-50/50">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <FileText className="w-5 h-5 text-brand-600 shrink-0" />
                 <div className="min-w-0">
                   <h3 className="font-bold text-ink-900 text-base leading-tight truncate">
@@ -295,12 +295,13 @@ export default function PenyimpananPage() {
                   <p className="text-xs text-ink-500 truncate">{detailArsip.namaBerkas}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <StatusBadge status={detailArsip.status} />
                 <button
                   type="button"
                   onClick={() => setDetailArsip(null)}
                   className="btn-ghost p-1.5 text-ink-400 hover:text-ink-700 rounded-lg"
+                  title="Tutup"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -308,7 +309,7 @@ export default function PenyimpananPage() {
             </div>
 
             {/* Content */}
-            <div className="p-6 overflow-y-auto space-y-6 text-sm">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-6 text-sm">
               {/* Section 1: Identitas Arsip */}
               <div>
                 <h4 className="text-xs font-bold text-brand-700 uppercase tracking-wider mb-3 flex items-center gap-1.5">
@@ -452,7 +453,7 @@ export default function PenyimpananPage() {
             </div>
 
             {/* Footer */}
-            <div className="flex justify-end px-6 py-3 border-t border-ink-100 bg-ink-50/50">
+            <div className="shrink-0 flex justify-end px-5 sm:px-6 py-3 border-t border-ink-100 bg-ink-50/50">
               <button
                 type="button"
                 onClick={() => setDetailArsip(null)}

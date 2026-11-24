@@ -480,36 +480,77 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [currentUser]
   );
 
-  const updateArsip = useCallback(async (id: string, patch: Partial<Arsip>) => {
-    const nowIso = new Date().toISOString();
-    skipNextStorageEvent.current = true;
-    setState((prev) => ({
-      ...prev,
-      arsip: prev.arsip.map((a) =>
-        a.id === id ? { ...a, ...patch, updatedAt: nowIso } : a
-      ),
-    }));
+  const updateArsip = useCallback(
+    async (id: string, patch: Partial<Arsip>) => {
+      const isIdentityUpdate =
+        patch.nomorDokumen !== undefined ||
+        patch.namaBerkas !== undefined ||
+        patch.jenisDokumen !== undefined ||
+        patch.tanggalSurat !== undefined ||
+        patch.pengirim !== undefined ||
+        patch.penerima !== undefined ||
+        patch.perihal !== undefined ||
+        patch.lampiran !== undefined ||
+        patch.isiRingkas !== undefined ||
+        patch.tembusan !== undefined ||
+        patch.nilaiGuna !== undefined ||
+        patch.masaRetensiHari !== undefined ||
+        patch.tanggalRetensi !== undefined;
 
-    if (isSupabaseConfigured) {
-      const dbPatch: any = {};
-      if (patch.subjek !== undefined) dbPatch.subjek = patch.subjek;
-      if (patch.bulan !== undefined) dbPatch.bulan = patch.bulan;
-      if (patch.status !== undefined) dbPatch.status = patch.status;
-      if (patch.aksiPenyusutan !== undefined) dbPatch.aksi_penyusutan = patch.aksiPenyusutan;
-      if (patch.tanggalAksi !== undefined) dbPatch.tanggal_aksi = patch.tanggalAksi;
-      if (patch.catatanGuru !== undefined) dbPatch.catatan_guru = patch.catatanGuru;
-      if (patch.nilai !== undefined) dbPatch.nilai = patch.nilai;
-      if (patch.nilaiAngka !== undefined) dbPatch.nilai_angka = patch.nilaiAngka;
-
-      if (Object.keys(dbPatch).length > 0) {
-        dbPatch.updated_at = nowIso;
-        const { error } = await supabase.from('arsip').update(dbPatch).eq('id', id);
-        if (error) {
-          console.error('Error updating arsip in Supabase:', error);
+      const target = state.arsip.find((a) => a.id === id);
+      if (isIdentityUpdate && target) {
+        if (target.status !== 'aktif' && target.status !== 'menjelang') {
+          throw new Error('Arsip dengan status ini tidak dapat diedit identitasnya.');
         }
       }
-    }
-  }, []);
+
+      const nowIso = new Date().toISOString();
+      skipNextStorageEvent.current = true;
+      setState((prev) => ({
+        ...prev,
+        arsip: prev.arsip.map((a) =>
+          a.id === id ? { ...a, ...patch, updatedAt: nowIso } : a
+        ),
+      }));
+
+      if (isSupabaseConfigured) {
+        const dbPatch: any = {};
+        if (patch.subjek !== undefined) dbPatch.subjek = patch.subjek;
+        if (patch.bulan !== undefined) dbPatch.bulan = patch.bulan;
+        if (patch.nomorDokumen !== undefined) dbPatch.nomor_dokumen = patch.nomorDokumen;
+        if (patch.namaBerkas !== undefined) dbPatch.nama_berkas = patch.namaBerkas;
+        if (patch.jenisDokumen !== undefined) dbPatch.jenis_dokumen = patch.jenisDokumen;
+        if (patch.tanggalSurat !== undefined) dbPatch.tanggal_surat = patch.tanggalSurat;
+        if (patch.pengirim !== undefined) dbPatch.pengirim = patch.pengirim;
+        if (patch.penerima !== undefined) dbPatch.penerima = patch.penerima;
+        if (patch.perihal !== undefined) dbPatch.perihal = patch.perihal;
+        if (patch.lampiran !== undefined) dbPatch.lampiran = patch.lampiran;
+        if (patch.isiRingkas !== undefined) dbPatch.isi_ringkas = patch.isiRingkas;
+        if (patch.tembusan !== undefined) dbPatch.tembusan = patch.tembusan;
+        if (patch.nilaiGuna !== undefined) dbPatch.nilai_guna = patch.nilaiGuna;
+        if (patch.masaRetensiHari !== undefined) dbPatch.masa_retensi_hari = patch.masaRetensiHari;
+        if (patch.tanggalRetensi !== undefined) dbPatch.tanggal_retensi = patch.tanggalRetensi;
+        if (patch.status !== undefined) dbPatch.status = patch.status;
+        if (patch.aksiPenyusutan !== undefined) dbPatch.aksi_penyusutan = patch.aksiPenyusutan;
+        if (patch.tanggalAksi !== undefined) dbPatch.tanggal_aksi = patch.tanggalAksi;
+        if (patch.catatanGuru !== undefined) dbPatch.catatan_guru = patch.catatanGuru;
+        if (patch.nilai !== undefined) dbPatch.nilai = patch.nilai;
+        if (patch.nilaiAngka !== undefined) dbPatch.nilai_angka = patch.nilaiAngka;
+
+        if (Object.keys(dbPatch).length > 0) {
+          dbPatch.updated_at = nowIso;
+          const { error } = await supabase.from('arsip').update(dbPatch).eq('id', id);
+          if (error) {
+            console.error('Error updating arsip in Supabase:', error);
+            if (isIdentityUpdate) {
+              throw new Error(error.message || 'Gagal memperbarui data arsip di database.');
+            }
+          }
+        }
+      }
+    },
+    [state.arsip]
+  );
 
   const deleteArsip = useCallback(async (id: string) => {
     skipNextStorageEvent.current = true;
